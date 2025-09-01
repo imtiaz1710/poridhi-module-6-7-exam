@@ -2,6 +2,10 @@
 import pulumi
 import pulumi_aws as aws
 
+config = pulumi.Config()
+public_ip = config.require("publicIp") 
+
+
 vpc = aws.ec2.Vpc("poridhi-vpc",
                   cidr_block="10.0.0.0/16",
                   tags={
@@ -86,3 +90,50 @@ private_route_table_association = aws.ec2.RouteTableAssociation("private_route_t
                                                                )
 pulumi.export("private_route_table_id", private_route_table.id)
 
+
+public_security_group = aws.ec2.SecurityGroup("bastion-sg",
+                                                name="bastion-sg",
+                                                description="Security group for bastion host - SSH access only from my IP",
+                                                vpc_id=vpc.id,
+                                                ingress=[
+                                                    aws.ec2.SecurityGroupIngressArgs(
+                                                        description="SSH from my public IP only",
+                                                        protocol="tcp",
+                                                        from_port=22,
+                                                        to_port=22,
+                                                        cidr_blocks=[public_ip],  # Only your public IP
+                                                    )
+                                                ],
+                                                egress=[
+                                                    aws.ec2.SecurityGroupEgressArgs(
+                                                        description="All outbound traffic",
+                                                        protocol="-1",
+                                                        from_port=0,
+                                                        to_port=0,
+                                                        cidr_blocks=["0.0.0.0/0"]
+                                                    )
+                                                ],
+                                                tags={
+                                                    "Name": "bastion-sg",
+                                                    "Purpose": "SSH access to bastion host"
+                                                }
+                                            )
+
+pulumi.export("public_sg_id", public_security_group.id)
+
+
+# Use the specified Ubuntu 24.04 LTS AMI
+ami_id = 'ami-0933f1385008d33c4'
+
+# Create an EC2 instance in the public subnet
+public_instance = aws.ec2.Instance("public-instance",
+    instance_type="t2.micro",
+    vpc_security_group_ids=[public_security_group.id],
+    ami=ami_id,
+    subnet_id=public_subnet.id,
+    key_name="MyKeyPair",
+    associate_public_ip_address=True,
+    tags= {
+    "Name":  "public-ec2"
+    }
+)
