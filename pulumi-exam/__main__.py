@@ -3,6 +3,8 @@ import pulumi
 import pulumi_aws as aws
 import base64
 
+# Task 1: VPC, public subnet, private subnets, igw,  public route table, nat gateway, private route table
+
 config = pulumi.Config()
 public_ip = config.require("publicIp") 
 
@@ -26,6 +28,15 @@ public_subnet = aws.ec2.Subnet("public-subnet",
 
 pulumi.export("public_subnet_id", public_subnet.id)
 
+private_subnet = aws.ec2.Subnet("private-subnet",
+    vpc_id=vpc.id,
+    cidr_block="10.0.2.0/24",
+    availability_zone="ap-southeast-1a",
+    tags={
+        "Name": "my-private-subnet"
+    }
+)
+
 igw = aws.ec2.InternetGateway("internet-gateway",
                               vpc_id=vpc.id,
                               tags={
@@ -33,6 +44,9 @@ igw = aws.ec2.InternetGateway("internet-gateway",
                               })
 
 pulumi.export("igw_id", igw.id)
+
+
+pulumi.export("private_subnet_id", private_subnet.id)
 
 public_route_table = aws.ec2.RouteTable("public-route-table",
                                         vpc_id=vpc.id,
@@ -52,17 +66,6 @@ public_route_table_association = aws.ec2.RouteTableAssociation("public_route_tab
 
 pulumi.export("public_route_table_id", public_route_table.id)
 
-private_subnet = aws.ec2.Subnet("private-subnet",
-    vpc_id=vpc.id,
-    cidr_block="10.0.2.0/24",
-    availability_zone="ap-southeast-1a",
-    tags={
-        "Name": "my-private-subnet"
-    }
-)
-
-pulumi.export("private_subnet_id", private_subnet.id)
-
 eip = aws.ec2.Eip("nat-eip")
 pulumi.export("eip_public_ip", eip.public_ip)
 
@@ -74,6 +77,7 @@ nat_gateway = aws.ec2.NatGateway("nat-gateway",
                                     }
                                 )
 pulumi.export("nat_gateway_id", nat_gateway.id)
+
 
 private_route_table = aws.ec2.RouteTable("private-route-table",
                                          vpc_id=vpc.id,
@@ -90,6 +94,9 @@ private_route_table_association = aws.ec2.RouteTableAssociation("private_route_t
                                                                route_table_id=private_route_table.id
                                                                )
 pulumi.export("private_route_table_id", private_route_table.id)
+
+
+# Task 2: public ec2, bastion sg
 
 
 bastion_sg = aws.ec2.SecurityGroup("bastion-sg",
@@ -211,6 +218,9 @@ bastion_instance = aws.ec2.Instance("bastion-host",
 
 pulumi.export("bastion_instance_id", bastion_instance.id)
 pulumi.export("bastion_public_ip", bastion_instance.public_ip)
+
+
+# Task 3-4: private ec2, app-sg
 
 # Security Group (app-sg): SSH and MySQL only from bastion-sg  
 app_sg = aws.ec2.SecurityGroup("app-sg",
