@@ -259,6 +259,11 @@ mysql_password = config.require_secret("mysqlPassword")  # MySQL password
 private_user_data = f"""#!/bin/bash
 set -e
 
+# Log all output for debugging
+exec > >(tee /var/log/user-data.log) 2>&1
+
+echo "Starting MySQL installation and configuration at $(date)"
+
 # Update system
 apt-get update -y
 apt-get upgrade -y
@@ -271,32 +276,69 @@ apt-get install -y mysql-server
 systemctl start mysql
 systemctl enable mysql
 
+# Wait for MySQL to be fully ready
+echo "Waiting for MySQL to be ready..."
+sleep 30
+
+# Test MySQL connection before proceeding
+until mysql -u root -e "SELECT 1;" &>/dev/null; do
+    echo "Waiting for MySQL to accept connections..."
+    sleep 5
+done
+
+echo "MySQL is ready for connections"
+
 # Get instance private IP
 PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+echo "Instance private IP: $PRIVATE_IP"
 
-# Configure MySQL to listen on 127.0.0.1 and the instance's private IP
+# Configure MySQL to listen on all interfaces
 cat > /etc/mysql/mysql.conf.d/custom.cnf << EOF
 [mysqld]
 bind-address = 0.0.0.0
+skip-networking = 0
 EOF
 
 # Restart MySQL to apply configuration
 systemctl restart mysql
 
-# Wait for MySQL to be ready
-sleep 15
+# Wait for MySQL to be ready after restart
+sleep 20
+
+# Test MySQL connection again after restart
+until mysql -u root -e "SELECT 1;" &>/dev/null; do
+    echo "Waiting for MySQL to accept connections after restart..."
+    sleep 5
+done
+
+echo "MySQL is ready after configuration change"
 
 # Create database 'appdb' and user 'appuser' with generated password
-mysql -u root << SQLEOF
-CREATE DATABASE appdb;
-CREATE USER 'appuser'@'localhost' IDENTIFIED BY '{mysql_password}';
-CREATE USER 'appuser'@'%' IDENTIFIED BY '{mysql_password}';
+echo "Creating database and user..."
+
+mysql -u root << 'SQLEOF'
+-- Create database
+CREATE DATABASE IF NOT EXISTS appdb;
+
+-- Create users with proper host specifications
+CREATE USER IF NOT EXISTS 'appuser'@'localhost' IDENTIFIED BY '{mysql_password}';
+CREATE USER IF NOT EXISTS 'appuser'@'%' IDENTIFIED BY '{mysql_password}';
+
+-- Grant privileges
 GRANT ALL PRIVILEGES ON appdb.* TO 'appuser'@'localhost';
 GRANT ALL PRIVILEGES ON appdb.* TO 'appuser'@'%';
+
+-- Flush privileges to ensure changes take effect
 FLUSH PRIVILEGES;
+
+-- Show created users for verification
+SELECT user, host FROM mysql.user WHERE user = 'appuser';
 SQLEOF
 
+echo "Database and user creation completed"
+
 # Setup SSH for ubuntu user (default Ubuntu user)
+echo "Setting up SSH access..."
 mkdir -p /home/ubuntu/.ssh
 echo "{ssh_public_key.strip()}" > /home/ubuntu/.ssh/authorized_keys
 chmod 600 /home/ubuntu/.ssh/authorized_keys
@@ -306,10 +348,16 @@ chown -R ubuntu:ubuntu /home/ubuntu/.ssh
 systemctl is-enabled mysql
 systemctl is-active mysql
 
+# Test database connection
+echo "Testing database connection..."
+mysql -u appuser -p'{mysql_password}' -e "USE appdb; SELECT 'Database connection successful' as status;"
+
 # Log completion
-echo "MySQL installation and configuration completed at $(date)" >> /var/log/mysql-setup.log
-echo "Database: appdb, User: appuser created successfully" >> /var/log/mysql-setup.log
-echo "MySQL is listening on 0.0.0.0:3306" >> /var/log/mysql-setup.log
+echo "MySQL installation and configuration completed at $(date)" | tee -a /var/log/mysql-setup.log
+echo "Database: appdb, User: appuser created successfully" | tee -a /var/log/mysql-setup.log
+echo "MySQL is listening on 0.0.0.0:3306" | tee -a /var/log/mysql-setup.log
+
+echo "Setup completed successfully!"
 """
 
 private_instance = aws.ec2.Instance("private-app",
