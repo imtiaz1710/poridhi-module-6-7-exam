@@ -1,0 +1,5 @@
+*.pyc
+venv/
+Pulumi.dev.yaml
+key
+key.pub
